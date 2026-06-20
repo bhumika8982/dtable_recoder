@@ -1,0 +1,58 @@
+# ---- Web / API ----
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+pydantic==2.7.4
+pydantic-settings==2.3.4
+
+# ---- Database ----
+motor==3.4.0
+pymongo==4.7.3
+
+# ---- AWS S3 ----
+boto3==1.34.131
+
+# ---- HTTP client (Recall.ai) ----
+httpx==0.27.0
+
+# ---- OpenAI / GPT-4o ----
+openai==1.35.7
+
+# ---- Transcription / Diarization ----
+# NOTE: install torch + torchaudio matching your CUDA/CPU setup BEFORE these.
+#   Tested-good CPU build (Windows / Python 3.11):
+#     pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+#   Version constraints:
+#     * torchaudio must be <2.9 -- 2.9 removed `torchaudio.AudioMetaData`, which
+#       pyannote.audio 3.3.2 still imports (ImportError otherwise).
+#     * torch must be >=2.3 to support NumPy 2.x (we install numpy 2.x via pandas etc).
+#     * 2.8.0 is the newest pair satisfying both.
+#   Windows: torch needs the Microsoft Visual C++ Redistributable >=14.40 (VS 2015-2022).
+#       An older redist (e.g. 14.29) loads but fails with "c10.dll ... DLL initialization
+#       routine failed" (WinError 1114). Fix: install vc_redist.x64.exe from aka.ms/vs/17/release.
+# Pin `pyannote.audio` to match `whisperx` dependency (3.3.2 required by whisperx 3.3.1)
+# NOTE: whisperx >=3.3.1 pulls faster-whisper >=1.1.0, which relaxes the `av` pin to
+# `av>=11` so pip can use the prebuilt av wheel (av 11.* has no Windows wheel and would
+# otherwise require the MSVC C++ Build Tools to compile from source).
+whisperx==3.3.1
+pyannote.audio==3.3.2
+matplotlib  # required by pyannote.audio.tasks (not pulled in transitively)
+
+# ---- Vector search (Qdrant) ----
+qdrant-client==1.9.1
+
+# ---- Exports ----
+python-docx==1.1.2
+reportlab==4.2.2
+
+# ---- Utils ----
+python-dotenv==1.0.1
+tenacity==8.4.1
+
+# ---- Tests ----
+pytest==8.2.2
+pytest-asyncio==0.23.7
+mongomock-motor==0.0.29
+
+# Local embeddings for meeting-bot Ask/Search (semantic Q&A over transcripts)
+sentence-transformers==5.6.0

@@ -1,0 +1,41 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ---- Env / secrets ----
+.env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# ---- Local scratch / artifacts ----
+_tmp_debug/
+backend/_work/
+uploads/
+recordings/
+temp/
+logs/
+*.log
+*.wav
+*.mp4
+
+# ---- Node / frontend ----
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+dist/
+build/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
