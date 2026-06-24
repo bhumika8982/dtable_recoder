@@ -2,7 +2,8 @@
  * MeetingDetailPage — post-meeting single-page view.
  *
  * Three tabs:
- *   📝 Live Transcript  — Live (left) + AI-corrected (right) + two MoMs below
+ *   📝 Live Transcript  — Raw live (left) + AI-corrected (right, corrections in red)
+ *                         Default MoM (left) + AI MoM (right) below
  *   🎵 Audio            — Player → Transcript → Chat Bot → MoM
  *   🎬 Video            — Player → Transcript → Chat Bot → MoM
  */
@@ -54,6 +55,25 @@ function SectionLabel({ children }) {
   return <p className="mdp-sec-label">{children}</p>;
 }
 
+// ── Download button ───────────────────────────────────────────────────────────
+
+function DownloadBtn({ meetingId, source, label }) {
+  function handleDownload() {
+    const url = meetingBotApi.downloadTranscriptUrl(meetingId, source);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  return (
+    <button className="mdp-btn-download" onClick={handleDownload} title={`Download ${label} as .txt`}>
+      ⬇ Download .txt
+    </button>
+  );
+}
+
 // ── Tab: Live Transcript ──────────────────────────────────────────────────────
 
 function LiveTab({ meeting, onUpdate }) {
@@ -63,11 +83,11 @@ function LiveTab({ meeting, onUpdate }) {
   const [liveTx,   setLiveTx]   = useState(null);
   const [aiTx,     setAiTx]     = useState(null);
   const [liveMom,  setLiveMom]  = useState(null);
-  const [audioMom, setAudioMom] = useState(null);
+  const [aiMom,    setAiMom]    = useState(null);
 
-  const [aiTxBusy,  setAiTxBusy]  = useState(false);
+  const [aiTxBusy,   setAiTxBusy]   = useState(false);
   const [liveMomBusy, setLiveMomBusy] = useState(false);
-  const [audioMomBusy, setAudioMomBusy] = useState(false);
+  const [aiMomBusy,  setAiMomBusy]  = useState(false);
 
   useEffect(() => {
     if (meeting.live_transcript_status === "generated")
@@ -85,14 +105,14 @@ function LiveTab({ meeting, onUpdate }) {
   }, [id, meeting.live_mom_status]);
 
   useEffect(() => {
-    if (meeting.audio_mom_status === "generated")
-      meetingBotApi.getMom(id, "audio").then(setAudioMom).catch(() => null);
-  }, [id, meeting.audio_mom_status]);
+    if (meeting.ai_mom_status === "generated")
+      meetingBotApi.getAiMom(id).then(setAiMom).catch(() => null);
+  }, [id, meeting.ai_mom_status]);
 
   const generating =
-    meeting.ai_transcript_status === "generating" ||
-    meeting.live_mom_status === "generating" ||
-    meeting.audio_mom_status === "generating";
+    meeting.ai_transcript_status  === "generating" ||
+    meeting.live_mom_status        === "generating" ||
+    meeting.ai_mom_status          === "generating";
 
   useEffect(() => {
     if (!generating) return;
@@ -114,60 +134,66 @@ function LiveTab({ meeting, onUpdate }) {
     finally { setLiveMomBusy(false); }
   }
 
-  async function handleGenAudioMom() {
-    setAudioMomBusy(true);
-    try { await meetingBotApi.generateAudioMom(id); onUpdate?.(); }
-    catch (e) { alert(`MoM failed: ${e.message}`); }
-    finally { setAudioMomBusy(false); }
+  async function handleGenAiMom() {
+    setAiMomBusy(true);
+    try { await meetingBotApi.generateAiMom(id); onUpdate?.(); }
+    catch (e) { alert(`AI MoM failed: ${e.message}`); }
+    finally { setAiMomBusy(false); }
   }
 
   const liveStatus = meeting.live_transcript_status;
   const aiStatus   = meeting.ai_transcript_status;
   const lmStatus   = meeting.live_mom_status;
-  const amStatus   = meeting.audio_mom_status;
+  const amStatus   = meeting.ai_mom_status;
 
-  const canGenAi  = a.can_generate_ai_transcript && !aiTxBusy;
-  const canLiveMom  = a.can_generate_live_mom && !liveMomBusy;
-  const canAudioMom = a.can_generate_audio_mom && !audioMomBusy;
+  const canGenAi     = a.can_generate_ai_transcript && !aiTxBusy;
+  const canLiveMom   = a.can_generate_live_mom       && !liveMomBusy;
+  const canAiMom     = a.can_generate_ai_mom          && !aiMomBusy;
 
   return (
     <div className="mdp-live-tab">
-      {/* ── Row 1: transcripts side by side ── */}
+      {/* ── Row 1: Raw live transcript (left) + AI transcript (right) ── */}
       <div className="mdp-row">
 
-        {/* Left — Live Transcript */}
+        {/* Left — Live / Raw Transcript */}
         <Panel icon="📝" title="Live Transcript" badge={liveStatus}>
           {(!liveStatus || liveStatus === "not_started") && (
-            <EmptyBox icon="⏳" title="Live transcript not available yet."
-              sub="Live captions are captured while the meeting is running." />
+            <EmptyBox icon="⏳" title="Live transcript not available."
+              sub="Live captions are captured during the meeting (requires public webhook URL)." />
           )}
           {liveStatus === "generating" && (
-            <div className="mdp-loading-row"><Spin />Capturing…</div>
+            <div className="mdp-loading-row"><Spin />Capturing live transcript…</div>
           )}
           {liveStatus === "failed" && (
             <EmptyBox icon="⚠️" title="Live transcript capture failed." />
           )}
           {liveStatus === "generated" && (
-            <div className="mdp-scroll">
-              <TranscriptViewer chunks={liveTx?.chunks}
-                emptyText="Live transcript is empty." />
-            </div>
+            <>
+              <div className="mdp-panel-actions">
+                <DownloadBtn meetingId={id} source="live" label="Live Transcript" />
+              </div>
+              <div className="mdp-scroll">
+                <TranscriptViewer chunks={liveTx?.chunks}
+                  emptyText="Live transcript is empty." />
+              </div>
+            </>
           )}
         </Panel>
 
-        {/* Right — AI Transcript */}
+        {/* Right — AI Transcript (corrections highlighted in red) */}
         <Panel icon="🤖" title="AI Transcript" badge={aiStatus} accent>
           <p className="mdp-ai-hint">
-            AI analyses the live transcript and corrects wrong words.{" "}
-            <span className="mdp-ai-correction-sample">Corrected words</span>{" "}
-            are shown underlined in blue.
+            AI reads the raw transcript, fixes ASR errors, and preserves the exact
+            language mix (English + Hindi / Hinglish).{" "}
+            <span className="mb-corrected">Corrected words</span>{" "}
+            are highlighted in red — hover to see the original.
           </p>
 
           {(aiStatus === "not_started" || !aiStatus) && (
             <div className="mdp-gen-block">
               {meeting.audio_transcript_status !== "generated" && (
                 <EmptyBox icon="🎙️" title="Audio transcript not generated yet."
-                  sub="Clicking Generate AI Transcript will automatically create the audio transcript first, then run AI proofreading." />
+                  sub="Generate AI Transcript will auto-create the audio transcript first, then proofread it." />
               )}
               <button onClick={handleGenAi} disabled={!canGenAi}>
                 {aiTxBusy ? <><Spin sm />Starting…</> : "✨ Generate AI Transcript"}
@@ -179,33 +205,36 @@ function LiveTab({ meeting, onUpdate }) {
           )}
           {aiStatus === "failed" && (
             <div className="mdp-gen-block">
-              <EmptyBox icon="⚠️" title="AI transcript generation failed." />
+              <EmptyBox icon="⚠️" title="AI transcript failed." />
               <button onClick={handleGenAi} disabled={!canGenAi}>Retry</button>
             </div>
           )}
           {aiStatus === "generated" && (
-            <div className="mdp-scroll">
-              <AiTranscriptViewer chunks={aiTx?.chunks} />
-            </div>
+            <>
+              <div className="mdp-panel-actions">
+                <DownloadBtn meetingId={id} source="ai" label="AI Transcript" />
+              </div>
+              <div className="mdp-scroll">
+                <AiTranscriptViewer chunks={aiTx?.chunks} />
+              </div>
+            </>
           )}
         </Panel>
       </div>
 
-      {/* ── Row 2: MoMs side by side ── */}
+      {/* ── Row 2: Default MoM (left) + AI MoM (right) ── */}
       <div className="mdp-row">
 
-        {/* Left — Live MoM */}
+        {/* Left — Default MoM (from live or audio transcript) */}
         <Panel icon="📋" title="Minutes of Meeting" badge={lmStatus}>
           {lmStatus === "generating" && (
             <div className="mdp-loading-row"><Spin />Generating MoM…</div>
           )}
           {lmStatus === "generated" && liveMom ? (
-            <div className="mdp-scroll">
-              <MomViewer mom={liveMom} />
-            </div>
+            <div className="mdp-scroll"><MomViewer mom={liveMom} /></div>
           ) : lmStatus !== "generating" && (
             <EmptyBox icon="📋" title="MoM not generated yet."
-              sub="Click Generate MoM to create minutes from the live transcript." />
+              sub="Generates from the live transcript. Click Generate MoM." />
           )}
           <div className="mdp-panel-foot">
             <button onClick={handleGenLiveMom} disabled={!canLiveMom}>
@@ -214,22 +243,25 @@ function LiveTab({ meeting, onUpdate }) {
           </div>
         </Panel>
 
-        {/* Right — AI / Audio MoM */}
+        {/* Right — AI MoM (from AI-corrected transcript) */}
         <Panel icon="✨" title="MoM from AI Transcript" badge={amStatus} accent>
+          <p className="mdp-ai-hint" style={{ marginBottom: 10 }}>
+            Generated from the AI-corrected transcript — more accurate than the default MoM.
+          </p>
           {amStatus === "generating" && (
-            <div className="mdp-loading-row"><Spin />Generating MoM…</div>
+            <div className="mdp-loading-row"><Spin />Generating AI MoM…</div>
           )}
-          {amStatus === "generated" && audioMom ? (
-            <div className="mdp-scroll">
-              <MomViewer mom={audioMom} />
-            </div>
+          {amStatus === "generated" && aiMom ? (
+            <div className="mdp-scroll"><MomViewer mom={aiMom} /></div>
           ) : amStatus !== "generating" && (
-            <EmptyBox icon="✨" title="AI-powered MoM not generated yet."
-              sub="Click Generate MoM — audio transcript will be created automatically if not done yet." />
+            <EmptyBox icon="✨" title="AI MoM not generated yet."
+              sub={aiStatus === "generated"
+                ? "Click Generate AI MoM to create minutes from the corrected transcript."
+                : "Generate AI Transcript first, then generate AI MoM."} />
           )}
           <div className="mdp-panel-foot">
-            <button onClick={handleGenAudioMom} disabled={!canAudioMom}>
-              {amStatus === "generating" ? <><Spin sm />Generating…</> : "Generate MoM"}
+            <button onClick={handleGenAiMom} disabled={!canAiMom}>
+              {amStatus === "generating" ? <><Spin sm />Generating…</> : "Generate AI MoM"}
             </button>
           </div>
         </Panel>
@@ -405,7 +437,7 @@ function MediaTab({ type, meeting, onUpdate }) {
     finally { setEmbBusy(false); }
   }
 
-  const txGenerated = txStatus === "generated";
+  const txGenerated  = txStatus === "generated";
   const txGenerating = txStatus === "generating" || txBusy;
   const momGenerating = momStatus === "generating" || momBusy;
   const canGenTx  = a[`can_generate_${type}_transcript`] && !txBusy;
@@ -437,7 +469,7 @@ function MediaTab({ type, meeting, onUpdate }) {
           <div className="mdp-gen-block">
             <EmptyBox icon="🎙️"
               title="Transcript not generated yet."
-              sub={`Click the button to start ${label.toLowerCase()} transcription.`}
+              sub={`Click the button to start ${label.toLowerCase()} transcription. Mixed-language speech (English + Hindi) is preserved as-is.`}
             />
             <button onClick={handleGenTranscript} disabled={!canGenTx}>
               {txBusy ? <><Spin sm />Starting…</> : `Generate ${label} Transcript`}
@@ -445,13 +477,18 @@ function MediaTab({ type, meeting, onUpdate }) {
           </div>
         )}
         {txGenerated && (
-          <div className="mdp-scroll">
-            <TranscriptWithLanguage
-              meetingId={id}
-              source={type}
-              initialChunks={transcript?.chunks}
-            />
-          </div>
+          <>
+            <div className="mdp-panel-actions">
+              <DownloadBtn meetingId={id} source={type} label={`${label} Transcript`} />
+            </div>
+            <div className="mdp-scroll">
+              <TranscriptWithLanguage
+                meetingId={id}
+                source={type}
+                initialChunks={transcript?.chunks}
+              />
+            </div>
+          </>
         )}
       </Panel>
 

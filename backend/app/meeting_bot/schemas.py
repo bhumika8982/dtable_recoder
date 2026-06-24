@@ -96,6 +96,7 @@ class ActionState(BaseModel):
     can_generate_live_mom: bool = False
     can_generate_audio_transcript: bool = False
     can_generate_ai_transcript: bool = False
+    can_generate_ai_mom: bool = False
     can_generate_audio_mom: bool = False
     can_generate_video_transcript: bool = False
     can_generate_video_mom: bool = False
@@ -116,6 +117,7 @@ class MeetingDetail(BaseModel):
     live_mom_status: str
     audio_transcript_status: str
     ai_transcript_status: str = "not_started"
+    ai_mom_status: str = "not_started"
     audio_mom_status: str
     video_transcript_status: str
     video_mom_status: str

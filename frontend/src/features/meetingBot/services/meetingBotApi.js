@@ -45,6 +45,14 @@ export const meetingBotApi = {
 
   generateLiveMom: (id) => request(`/meetings/${id}/live/generate-mom`, { method: "POST" }),
 
+  // AI MoM: MoM generated from the AI-proofread (corrected) transcript.
+  generateAiMom: (id) => request(`/meetings/${id}/ai/generate-mom`, { method: "POST" }),
+  getAiMom: (id) => request(`/meetings/${id}/mom/ai`),
+
+  // Download transcript as a .txt file — returns the full URL so the caller can
+  // trigger a browser download directly without fetching through fetch().
+  downloadTranscriptUrl: (id, source) => `${ROOT}/meetings/${id}/transcripts/${source}/download`,
+
   // Transcript language translation — chunks cached in MongoDB after first call.
   translateAudioTranscript: (id, targetLanguage) =>
     request(`/meetings/${id}/audio/transcript/translate`, {

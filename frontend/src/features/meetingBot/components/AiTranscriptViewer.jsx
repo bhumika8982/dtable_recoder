@@ -1,6 +1,5 @@
-// AI-proofread transcript: shows the FULLY CORRECTED text in normal (white)
-// style — just like the regular transcript — with the corrected words subtly
-// underlined. Hover a corrected word to see what it originally was.
+// AI-proofread transcript: shows the FULLY CORRECTED text where words fixed
+// by AI are highlighted in red. Hover a red word to see the original ASR output.
 function ts(seconds) {
   const s = Math.max(0, Math.round(seconds || 0));
   const hh = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -43,8 +42,8 @@ export default function AiTranscriptViewer({ chunks }) {
   return (
     <div>
       <p className="muted mb-ai-legend">
-        Fully corrected transcript — {total} correction{total === 1 ? "" : "s"} (
-        <span className="mb-corrected">underlined</span>).
+        AI-corrected transcript — {total} fix{total === 1 ? "" : "es"} (
+        <span className="mb-corrected">shown in red</span> — hover to see original).
       </p>
       <div className="mb-transcript">
         {chunks.map((c, i) => (

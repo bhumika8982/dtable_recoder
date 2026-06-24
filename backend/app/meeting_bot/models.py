@@ -78,4 +78,5 @@ def s3_key(kind: str, meeting_id: str) -> str:
         "mom_live": f"mom/live/{meeting_id}.json",
         "mom_audio": f"mom/audio/{meeting_id}.json",
         "mom_video": f"mom/video/{meeting_id}.json",
+        "mom_ai": f"mom/ai/{meeting_id}.json",
     }[kind]

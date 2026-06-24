@@ -274,6 +274,41 @@ async def run_source_mom(meeting_id: str, source: Source, db) -> None:
     await _generate_and_save_mom(repo, s3, meeting_id, source, text, cid)
 
 
+async def run_ai_mom(meeting_id: str, db) -> None:
+    """Generate MoM from the AI-proofread transcript (uses corrected text)."""
+    repo = MeetingBotRepository(db)
+    s3 = MeetingBotS3()
+    cid = new_correlation_id()
+    logger.info("[%s] AI MoM START for %s", cid, meeting_id)
+
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        return
+
+    ai_chunks = await repo.get_chunks(meeting_id, Source.AI.value, limit=100000)
+    if not ai_chunks:
+        await repo.update_meeting(meeting_id, {"ai_mom_status": MomStatus.NOT_STARTED.value})
+        logger.warning("[%s] no AI transcript chunks — run AI transcript first", cid)
+        return
+
+    lines = []
+    for c in ai_chunks:
+        text = c.get("corrected_text") or c.get("text", "")
+        if text.strip():
+            lines.append(
+                f"[{_ts(c.get('start_time'))}] {c.get('speaker_name') or 'Unknown'}: {text}"
+            )
+
+    full_text = "\n".join(lines)
+    if not full_text.strip():
+        await repo.update_meeting(meeting_id, {"ai_mom_status": MomStatus.NOT_STARTED.value})
+        return
+
+    await repo.update_meeting(meeting_id, {"ai_mom_status": MomStatus.GENERATING.value})
+    await broker.publish(meeting_id, "status", {"ai_mom_status": MomStatus.GENERATING.value})
+    await _generate_and_save_mom(repo, s3, meeting_id, Source.AI, full_text, cid)
+
+
 async def _generate_and_save_mom(repo, s3, meeting_id, source: Source, text: str, cid) -> None:
     status_field = f"{source.value}_mom_status"
     mom_field = f"{source.value}_mom"

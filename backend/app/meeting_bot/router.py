@@ -6,6 +6,7 @@ Long-running operations run as FastAPI BackgroundTasks and are status-based.
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
@@ -33,6 +34,7 @@ from app.meeting_bot.recall_service import (
 )
 from app.meeting_bot.repository import MeetingBotRepository
 from app.meeting_bot import schemas
+from app.meeting_bot.utils import fmt_timestamp
 from app.services.recall_service import RecallError
 
 logger = logging.getLogger(__name__)
@@ -349,6 +351,59 @@ async def live_mom(meeting_id: str, bg: BackgroundTasks, repo: MeetingBotReposit
     return await _start_mom(meeting_id, Source.LIVE, bg, repo)
 
 
+@router.post("/meetings/{meeting_id}/ai/generate-mom", response_model=schemas.JobAccepted, status_code=202)
+async def ai_mom(meeting_id: str, bg: BackgroundTasks, repo: MeetingBotRepository = Depends(get_repo)):
+    """Generate MoM from the AI-proofread transcript (corrected text)."""
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    if meeting.get("ai_transcript_status") != TranscriptStatus.GENERATED.value:
+        raise HTTPException(status_code=400, detail="AI transcript not generated yet — generate it first")
+    if meeting.get("ai_mom_status") == MomStatus.GENERATING.value:
+        return schemas.JobAccepted(meeting_id=meeting_id, job="ai_mom", status="already_running")
+    bg.add_task(processing.run_ai_mom, meeting_id, get_database())
+    return schemas.JobAccepted(meeting_id=meeting_id, job="ai_mom", status="started")
+
+
+@router.get("/meetings/{meeting_id}/transcripts/{source}/download")
+async def download_transcript(
+    meeting_id: str,
+    source: Source,
+    repo: MeetingBotRepository = Depends(get_repo),
+):
+    """Download the transcript as a plain-text .txt file.
+
+    Format per line: [HH:MM:SS] Speaker: text
+    For the AI source, the corrected text is used.
+    Mixed-language content (English + Hindi / Hinglish) is preserved as-is.
+    """
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    chunks = await repo.get_chunks(meeting_id, source.value, limit=100000)
+    if not chunks:
+        raise HTTPException(status_code=404, detail="No transcript available for this source")
+
+    lines = []
+    for c in chunks:
+        text = (c.get("corrected_text") if source == Source.AI else None) or c.get("text", "")
+        if text and text.strip():
+            ts = fmt_timestamp(c.get("start_time") or 0)
+            speaker = c.get("speaker_name") or "Unknown"
+            lines.append(f"[{ts}] {speaker}: {text}")
+
+    content = "\n".join(lines)
+    safe_title = (meeting.get("meeting_title") or meeting_id)[:40].replace("/", "-").replace("\\", "-")
+    filename = f"transcript_{source.value}_{safe_title}.txt"
+
+    return StreamingResponse(
+        io.BytesIO(content.encode("utf-8")),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Per-source Ask (audio / video — filters embedded chunks by source)
 # --------------------------------------------------------------------------- #
@@ -522,6 +577,7 @@ def _to_detail(m: dict) -> schemas.MeetingDetail:
     completed = m.get("status") == MeetingStatus.COMPLETED.value
     audio_ready = m.get("audio_recording_status") in (RecordingStatus.UPLOADED.value, RecordingStatus.FAILED.value)
     video_ready = m.get("video_recording_status") in (RecordingStatus.UPLOADED.value, RecordingStatus.FAILED.value)
+    ai_tx_ready = m.get("ai_transcript_status") == TranscriptStatus.GENERATED.value
     actions = schemas.ActionState(
         can_generate_live_mom=m.get("live_transcript_status") == TranscriptStatus.GENERATED.value
         and m.get("live_mom_status") != MomStatus.GENERATING.value,
@@ -529,6 +585,8 @@ def _to_detail(m: dict) -> schemas.MeetingDetail:
         and m.get("audio_transcript_status") != TranscriptStatus.GENERATING.value,
         can_generate_ai_transcript=completed and audio_ready
         and m.get("ai_transcript_status") != TranscriptStatus.GENERATING.value,
+        can_generate_ai_mom=ai_tx_ready
+        and m.get("ai_mom_status") != MomStatus.GENERATING.value,
         can_generate_audio_mom=completed and audio_ready
         and m.get("audio_mom_status") != MomStatus.GENERATING.value,
         can_generate_video_transcript=completed and video_ready
@@ -548,6 +606,7 @@ def _to_detail(m: dict) -> schemas.MeetingDetail:
         live_mom_status=m.get("live_mom_status", MomStatus.NOT_STARTED.value),
         audio_transcript_status=m.get("audio_transcript_status", TranscriptStatus.NOT_STARTED.value),
         ai_transcript_status=m.get("ai_transcript_status", TranscriptStatus.NOT_STARTED.value),
+        ai_mom_status=m.get("ai_mom_status", MomStatus.NOT_STARTED.value),
         audio_mom_status=m.get("audio_mom_status", MomStatus.NOT_STARTED.value),
         video_transcript_status=m.get("video_transcript_status", TranscriptStatus.NOT_STARTED.value),
         video_mom_status=m.get("video_mom_status", MomStatus.NOT_STARTED.value),
