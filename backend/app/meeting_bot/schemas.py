@@ -93,6 +93,7 @@ class RecordingsOut(BaseModel):
 class ActionState(BaseModel):
     """What the frontend is allowed to trigger right now."""
 
+    can_generate_live_mom: bool = False
     can_generate_audio_transcript: bool = False
     can_generate_ai_transcript: bool = False
     can_generate_audio_mom: bool = False
@@ -122,6 +123,8 @@ class MeetingDetail(BaseModel):
     video_recording_url: Optional[str] = None
     embeddings_status: str = "not_started"
     embedded_chunks: int = 0
+    audio_transcript_language: Optional[str] = None
+    video_transcript_language: Optional[str] = None
     error: Optional[str] = None
     available_actions: ActionState
     created_at: Optional[datetime] = None
@@ -135,6 +138,17 @@ class JobAccepted(BaseModel):
     meeting_id: str
     job: str
     status: str
+
+
+class TranslateRequest(BaseModel):
+    target_language: str = Field(..., min_length=2, max_length=10)
+
+
+class TranslateResponse(BaseModel):
+    meeting_id: str
+    source: Source
+    lang: str
+    chunks: list[TranscriptChunkOut]
 
 
 class AskRequest(BaseModel):

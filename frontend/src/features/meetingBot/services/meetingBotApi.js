@@ -38,6 +38,24 @@ export const meetingBotApi = {
   generateEmbeddings: (id) => request(`/meetings/${id}/embeddings`, { method: "POST" }),
   ask: (id, question) =>
     request(`/meetings/${id}/ask`, { method: "POST", body: JSON.stringify({ question }) }),
+  askAudio: (id, question) =>
+    request(`/meetings/${id}/audio/ask`, { method: "POST", body: JSON.stringify({ question }) }),
+  askVideo: (id, question) =>
+    request(`/meetings/${id}/video/ask`, { method: "POST", body: JSON.stringify({ question }) }),
+
+  generateLiveMom: (id) => request(`/meetings/${id}/live/generate-mom`, { method: "POST" }),
+
+  // Transcript language translation — chunks cached in MongoDB after first call.
+  translateAudioTranscript: (id, targetLanguage) =>
+    request(`/meetings/${id}/audio/transcript/translate`, {
+      method: "POST",
+      body: JSON.stringify({ target_language: targetLanguage }),
+    }),
+  translateVideoTranscript: (id, targetLanguage) =>
+    request(`/meetings/${id}/video/transcript/translate`, {
+      method: "POST",
+      body: JSON.stringify({ target_language: targetLanguage }),
+    }),
 
   // Server-Sent Events stream for live updates.
   eventsUrl: (id) => `${ROOT}/meetings/${id}/events`,

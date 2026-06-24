@@ -3,8 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { meetingBotApi } from "../services/meetingBotApi.js";
 import MeetingCreateForm from "../components/MeetingCreateForm.jsx";
 import LiveMeetingScreen from "../components/LiveMeetingScreen.jsx";
-import ModuleGrid from "../components/ModuleGrid.jsx";
-import ModuleView from "../components/ModuleView.jsx";
+import MeetingDetailPage from "../components/MeetingDetailPage.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import Toast from "../components/Toast.jsx";
@@ -149,13 +148,12 @@ function ListAndCreate() {
   );
 }
 
-// ---------------- Detail (live / module grid / single module) ----------------
+// ---------------- Detail — single-page dashboard ----------------
 function Detail({ id }) {
-  const { module: moduleKey } = useParams();
   const [meeting, setMeeting] = useState(null);
   const [showStop, setShowStop] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const [toast, setToast] = useState(null); // { message, type }
+  const [toast, setToast] = useState(null);
 
   async function load() {
     try {
@@ -193,30 +191,29 @@ function Detail({ id }) {
 
   if (!meeting) return <p>Loading…</p>;
 
-  // A single module page (e.g. /meetings/:id/live-transcript) — render just it.
-  if (moduleKey) {
-    return <ModuleView meeting={meeting} moduleKey={moduleKey} onUpdate={load} />;
-  }
-
   const processing = meeting.status === "processing";
-  const active = ACTIVE.includes(meeting.status);
-  // Live screen while the meeting is running; module grid once it has ended.
-  const showGrid = !active;
+  const active     = ACTIVE.includes(meeting.status);
+  const dateStr    = meeting.created_at
+    ? new Date(meeting.created_at).toLocaleString()
+    : null;
 
   return (
     <div>
+      {/* ── Page header ── */}
       <div className="detail-header">
-        <h1>{meeting.meeting_title}</h1>
+        <Link to="/" className="dash-back">← All Meetings</Link>
+        <div className="dash-title-block">
+          <h1>{meeting.meeting_title}</h1>
+          {dateStr && <p className="muted dash-date">{dateStr}</p>}
+        </div>
         <StatusBadge status={meeting.status} />
         {active && (
           <button className="btn-stop" onClick={() => setShowStop(true)} disabled={stopping}>
             {stopping ? "Stopping…" : "Stop Meeting"}
           </button>
         )}
-        <div className="exports">
-          <Link to="/">← All</Link>
-        </div>
       </div>
+
       {meeting.error && <p className="error">Error: {meeting.error}</p>}
 
       {showStop && (
@@ -239,10 +236,11 @@ function Detail({ id }) {
         </div>
       )}
 
-      {showGrid ? (
-        <ModuleGrid meeting={meeting} />
-      ) : (
+      {/* ── Main content ── */}
+      {active ? (
         <LiveMeetingScreen meeting={meeting} onUpdate={load} />
+      ) : (
+        <MeetingDetailPage meeting={meeting} onUpdate={load} />
       )}
     </div>
   );

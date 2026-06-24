@@ -84,15 +84,18 @@ async def generate_embeddings(meeting_id: str, db) -> None:
 # --------------------------------------------------------------------------- #
 # Ask (retrieval-augmented)
 # --------------------------------------------------------------------------- #
-async def ask(meeting_id: str, question: str, db, top_k: int = 8) -> dict[str, Any]:
+async def ask(meeting_id: str, question: str, db, top_k: int = 8, source_filter: Optional[str] = None) -> dict[str, Any]:
     repo = MeetingBotRepository(db)
     chunks = await repo.get_embedded_chunks(meeting_id)
+    if source_filter:
+        chunks = [c for c in chunks if c.get("source") == source_filter]
     if not chunks:
-        return {
-            "answer": "No embeddings yet. Click \"Generate Embeddings\" first so I can "
-                      "search the transcript.",
-            "sources": [],
-        }
+        msg = (
+            f"No embeddings found for the {source_filter} transcript. Generate embeddings first."
+            if source_filter else
+            "No embeddings yet. Generate embeddings first to enable Q&A."
+        )
+        return {"answer": msg, "sources": []}
     qvec = await embedding_service.embed_query(question)
     if qvec is None:
         return {"answer": "Embedding model unavailable.", "sources": []}

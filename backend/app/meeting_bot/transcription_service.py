@@ -26,17 +26,20 @@ async def transcribe_to_chunks(
     source: Source,
     num_speakers: Optional[int] = None,
     speaker_turns: Optional[list[dict[str, Any]]] = None,
-) -> tuple[list[dict[str, Any]], str]:
-    """Transcribe ``audio_path`` and return ``(chunks, full_text)``.
+) -> tuple[list[dict[str, Any]], str, str]:
+    """Transcribe ``audio_path`` and return ``(chunks, full_text, language)``.
 
     ``speaker_turns`` lets the caller supply real names (e.g. Recall timeline);
     otherwise pyannote diarization is used (best-effort, never fatal).
+    ``language`` is the ISO 639-1 code auto-detected by WhisperX (e.g. "hi",
+    "en") — empty string when detection was inconclusive.
     """
     logger.info("[%s] Transcription started: %s", source.value, audio_path)
     raw = await get_transcription_service().transcribe(audio_path)
+    detected_language = raw.get("language") or ""
     logger.info(
         "[%s] Transcription done: %d segments (lang=%s)",
-        source.value, len(raw.get("segments", [])), raw.get("language"),
+        source.value, len(raw.get("segments", [])), detected_language,
     )
 
     if speaker_turns is None:
@@ -51,7 +54,7 @@ async def transcribe_to_chunks(
 
     merged = merge_transcript_with_speakers(raw, speaker_turns or [])
     chunks = segments_to_chunks(merged["segments"], meeting_id, bot_id, source)
-    return chunks, merged.get("full_text", "")
+    return chunks, merged.get("full_text", ""), detected_language
 
 
 def segments_to_chunks(

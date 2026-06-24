@@ -84,25 +84,21 @@ async def finalize_meeting(meeting_id: str, db) -> None:
     await _store_recording(repo, s3, meeting_id, "audio", urls.get("audio"), cid)
     await _store_recording(repo, s3, meeting_id, "video", urls.get("video"), cid)
 
-    # --- 3. transcript + MoM ---
+    # --- 3. MoM from live transcript (if live captions were captured) ---
     fresh = await repo.get_meeting(meeting_id)
     live_text = (fresh or {}).get("live_transcript_text") or ""
     if live_text.strip():
-        # Live captions were captured -> MoM from the live transcript (the default rule).
+        # Live captions were captured → MoM from the live transcript.
         await _generate_and_save_mom(repo, s3, meeting_id, Source.LIVE, live_text, cid)
     else:
-        # No live captions (e.g. no public webhook). So the meeting still has a
-        # usable transcript + MoM the moment it ends, auto-transcribe the recorded
-        # audio and summarise it. The manual audio/video buttons remain for re-runs.
-        logger.info("[%s] no live transcript — auto-preparing transcript+MoM from audio", cid)
+        # No live captions (e.g. no public webhook URL configured).
+        # Audio/video transcripts are only generated when the user explicitly
+        # clicks the button — never auto-triggered here.
+        logger.info(
+            "[%s] no live transcript — audio/video transcripts available on demand via UI buttons",
+            cid,
+        )
         await repo.update_meeting(meeting_id, {"live_mom_status": MomStatus.NOT_STARTED.value})
-        try:
-            await run_media_transcription(meeting_id, Source.AUDIO, db)
-            after = await repo.get_meeting(meeting_id)
-            if (after or {}).get("audio_transcript_status") == TranscriptStatus.GENERATED.value:
-                await run_source_mom(meeting_id, Source.AUDIO, db)
-        except Exception:  # noqa: BLE001 — auto-prep is best-effort
-            logger.exception("[%s] auto audio transcript/MoM failed", cid)
 
     await repo.update_meeting(meeting_id, {
         "status": M.MeetingStatus.COMPLETED.value,
@@ -192,10 +188,12 @@ async def run_media_transcription(meeting_id: str, source: Source, db) -> None:
             logger.warning("[%s] speaker timeline unavailable; using pyannote", cid)
 
         # 4. transcribe -> chunks.
-        chunks, full_text = await transcribe_to_chunks(
+        chunks, full_text, detected_lang = await transcribe_to_chunks(
             wav_local, meeting_id, meeting.get("bot_id"), source,
             num_speakers=meeting.get("num_speakers"), speaker_turns=speaker_turns,
         )
+        if detected_lang:
+            logger.info("[%s] detected language: %s", cid, detected_lang)
 
         # 5. optional embeddings (best-effort).
         await embed_chunks(chunks)
@@ -203,8 +201,11 @@ async def run_media_transcription(meeting_id: str, source: Source, db) -> None:
         # 6. persist chunks + full text + S3.
         await repo.replace_chunks(meeting_id, source.value, chunks)
         await s3.upload_bytes(full_text.encode(), f"transcript_{kind}", meeting_id, "text/plain")
+        lang_update = {f"{source.value}_transcript_language": detected_lang} if detected_lang else {}
         await repo.update_meeting(meeting_id, {
-            text_field: full_text, status_field: TranscriptStatus.GENERATED.value,
+            text_field: full_text,
+            status_field: TranscriptStatus.GENERATED.value,
+            **lang_update,
         })
         await broker.publish(meeting_id, "status", {status_field: TranscriptStatus.GENERATED.value})
         logger.info("[%s] %s transcription DONE (%d chunks)", cid, source.value, len(chunks))

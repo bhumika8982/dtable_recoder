@@ -18,12 +18,14 @@ export const MODULES = [
     info: "Recorded meeting audio (MP3) with player.",
     group: "Recordings",
   },
+  // Combined video card — shows recording player + transcript (with language
+  // tabs) + MoM all in one page instead of three separate cards.
   {
-    key: "video-recording",
+    key: "video",
     title: "Video Recording",
-    statusField: "video_recording_status",
-    info: "Recorded meeting video (MP4) with player.",
-    group: "Recordings",
+    statusField: "video_transcript_status",
+    info: "Video recording, transcript with language tabs, and Minutes of Meeting.",
+    group: "Video",
   },
   {
     key: "audio-transcript",
@@ -45,13 +47,6 @@ export const MODULES = [
     statusField: "audio_mom_status",
     info: "Minutes of Meeting — auto-generated from the meeting.",
     group: "MoM",
-  },
-  {
-    key: "video-transcript",
-    title: "Video Transcript",
-    statusField: "video_transcript_status",
-    info: "Transcript extracted from the video file.",
-    group: "Video",
   },
   {
     key: "ask",

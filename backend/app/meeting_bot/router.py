@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meeting-bot", tags=["meeting-bot"])
 
+# Language codes supported by the transcript translate endpoints.
+_TRANSLATE_LANGS = {"hi", "en"}
+
 
 def get_repo() -> MeetingBotRepository:
     return MeetingBotRepository(get_database())
@@ -238,17 +241,50 @@ async def ai_transcript(meeting_id: str, bg: BackgroundTasks, repo: MeetingBotRe
     meeting = await repo.get_meeting(meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
-    if meeting.get("audio_transcript_status") != TranscriptStatus.GENERATED.value:
-        raise HTTPException(status_code=400, detail="Audio transcript not generated yet")
     if meeting.get("ai_transcript_status") == TranscriptStatus.GENERATING.value:
         return schemas.JobAccepted(meeting_id=meeting_id, job="ai_transcript", status="already_running")
-    bg.add_task(ai_transcript_service.generate_ai_transcript, meeting_id, get_database())
+    # Auto-generate audio transcript first if not already done, then AI proofreading.
+    bg.add_task(_run_ai_transcript_pipeline, meeting_id, get_database())
     return schemas.JobAccepted(meeting_id=meeting_id, job="ai_transcript", status="started")
+
+
+async def _run_ai_transcript_pipeline(meeting_id: str, db) -> None:
+    """Generate audio transcript (if missing) then run AI proofreading."""
+    repo = MeetingBotRepository(db)
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        return
+    if meeting.get("audio_transcript_status") != TranscriptStatus.GENERATED.value:
+        await processing.run_media_transcription(meeting_id, Source.AUDIO, db)
+        meeting = await repo.get_meeting(meeting_id)
+        if (meeting or {}).get("audio_transcript_status") != TranscriptStatus.GENERATED.value:
+            return  # audio transcription failed — stop here
+    await ai_transcript_service.generate_ai_transcript(meeting_id, db)
 
 
 @router.post("/meetings/{meeting_id}/audio/generate-mom", response_model=schemas.JobAccepted, status_code=202)
 async def audio_mom(meeting_id: str, bg: BackgroundTasks, repo: MeetingBotRepository = Depends(get_repo)):
-    return await _start_mom(meeting_id, Source.AUDIO, bg, repo)
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    if meeting.get("audio_mom_status") == MomStatus.GENERATING.value:
+        return schemas.JobAccepted(meeting_id=meeting_id, job="audio_mom", status="already_running")
+    bg.add_task(_run_audio_mom_pipeline, meeting_id, get_database())
+    return schemas.JobAccepted(meeting_id=meeting_id, job="audio_mom", status="started")
+
+
+async def _run_audio_mom_pipeline(meeting_id: str, db) -> None:
+    """Generate audio transcript (if missing) then generate MoM."""
+    repo = MeetingBotRepository(db)
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        return
+    if meeting.get("audio_transcript_status") != TranscriptStatus.GENERATED.value:
+        await processing.run_media_transcription(meeting_id, Source.AUDIO, db)
+        meeting = await repo.get_meeting(meeting_id)
+        if (meeting or {}).get("audio_transcript_status") != TranscriptStatus.GENERATED.value:
+            return  # transcription failed — stop
+    await processing.run_source_mom(meeting_id, Source.AUDIO, db)
 
 
 @router.post("/meetings/{meeting_id}/video/generate-mom", response_model=schemas.JobAccepted, status_code=202)
@@ -303,6 +339,90 @@ async def ask_meeting(meeting_id: str, payload: schemas.AskRequest, repo: Meetin
         meeting_id=meeting_id, question=payload.question,
         answer=result["answer"], sources=result["sources"],
     )
+
+
+# --------------------------------------------------------------------------- #
+# Live MoM (user-triggered from the single-page dashboard)
+# --------------------------------------------------------------------------- #
+@router.post("/meetings/{meeting_id}/live/generate-mom", response_model=schemas.JobAccepted, status_code=202)
+async def live_mom(meeting_id: str, bg: BackgroundTasks, repo: MeetingBotRepository = Depends(get_repo)):
+    return await _start_mom(meeting_id, Source.LIVE, bg, repo)
+
+
+# --------------------------------------------------------------------------- #
+# Per-source Ask (audio / video — filters embedded chunks by source)
+# --------------------------------------------------------------------------- #
+@router.post("/meetings/{meeting_id}/audio/ask", response_model=schemas.AskResponse)
+async def ask_audio(meeting_id: str, payload: schemas.AskRequest, repo: MeetingBotRepository = Depends(get_repo)):
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    result = await rag_service.ask(meeting_id, payload.question, get_database(), top_k=payload.top_k, source_filter=Source.AUDIO.value)
+    return schemas.AskResponse(meeting_id=meeting_id, question=payload.question, answer=result["answer"], sources=result["sources"])
+
+
+@router.post("/meetings/{meeting_id}/video/ask", response_model=schemas.AskResponse)
+async def ask_video(meeting_id: str, payload: schemas.AskRequest, repo: MeetingBotRepository = Depends(get_repo)):
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    result = await rag_service.ask(meeting_id, payload.question, get_database(), top_k=payload.top_k, source_filter=Source.VIDEO.value)
+    return schemas.AskResponse(meeting_id=meeting_id, question=payload.question, answer=result["answer"], sources=result["sources"])
+
+
+# --------------------------------------------------------------------------- #
+# Transcript translation  (POST → translated chunks cached in MongoDB)
+# --------------------------------------------------------------------------- #
+@router.post("/meetings/{meeting_id}/audio/transcript/translate", response_model=schemas.TranslateResponse)
+async def translate_audio_transcript(
+    meeting_id: str,
+    payload: schemas.TranslateRequest,
+    repo: MeetingBotRepository = Depends(get_repo),
+):
+    """Translate audio transcript to Hindi ('hi') or English ('en').
+
+    Results are cached on the meeting document; subsequent calls for the same
+    language return immediately without calling the LLM again.
+    """
+    if payload.target_language not in _TRANSLATE_LANGS:
+        raise HTTPException(400, detail=f"Unsupported language '{payload.target_language}'. Use: {sorted(_TRANSLATE_LANGS)}")
+    return await _do_translate(meeting_id, Source.AUDIO, payload.target_language, repo)
+
+
+@router.post("/meetings/{meeting_id}/video/transcript/translate", response_model=schemas.TranslateResponse)
+async def translate_video_transcript(
+    meeting_id: str,
+    payload: schemas.TranslateRequest,
+    repo: MeetingBotRepository = Depends(get_repo),
+):
+    """Translate video transcript to Hindi ('hi') or English ('en')."""
+    if payload.target_language not in _TRANSLATE_LANGS:
+        raise HTTPException(400, detail=f"Unsupported language '{payload.target_language}'. Use: {sorted(_TRANSLATE_LANGS)}")
+    return await _do_translate(meeting_id, Source.VIDEO, payload.target_language, repo)
+
+
+async def _do_translate(
+    meeting_id: str, source: Source, lang: str, repo: MeetingBotRepository
+) -> schemas.TranslateResponse:
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    chunks = await repo.get_chunks(meeting_id, source.value, limit=100000)
+    if not chunks:
+        return schemas.TranslateResponse(meeting_id=meeting_id, source=source, lang=lang, chunks=[])
+
+    # translate_transcript returns a list of translated texts aligned to chunks,
+    # or None for native/unsupported languages. Results are cached in MongoDB.
+    translated = await translate_transcript(meeting_id, source, lang, repo)
+
+    out = []
+    for i, c in enumerate(chunks):
+        if translated and i < len(translated) and translated[i]:
+            c = {**c, "text": translated[i]}
+        out.append(_chunk_out(c, source))
+
+    return schemas.TranslateResponse(meeting_id=meeting_id, source=source, lang=lang, chunks=out)
 
 
 # --------------------------------------------------------------------------- #
@@ -403,11 +523,13 @@ def _to_detail(m: dict) -> schemas.MeetingDetail:
     audio_ready = m.get("audio_recording_status") in (RecordingStatus.UPLOADED.value, RecordingStatus.FAILED.value)
     video_ready = m.get("video_recording_status") in (RecordingStatus.UPLOADED.value, RecordingStatus.FAILED.value)
     actions = schemas.ActionState(
+        can_generate_live_mom=m.get("live_transcript_status") == TranscriptStatus.GENERATED.value
+        and m.get("live_mom_status") != MomStatus.GENERATING.value,
         can_generate_audio_transcript=completed and audio_ready
         and m.get("audio_transcript_status") != TranscriptStatus.GENERATING.value,
-        can_generate_ai_transcript=m.get("audio_transcript_status") == TranscriptStatus.GENERATED.value
+        can_generate_ai_transcript=completed and audio_ready
         and m.get("ai_transcript_status") != TranscriptStatus.GENERATING.value,
-        can_generate_audio_mom=m.get("audio_transcript_status") == TranscriptStatus.GENERATED.value
+        can_generate_audio_mom=completed and audio_ready
         and m.get("audio_mom_status") != MomStatus.GENERATING.value,
         can_generate_video_transcript=completed and video_ready
         and m.get("video_transcript_status") != TranscriptStatus.GENERATING.value,
@@ -432,6 +554,8 @@ def _to_detail(m: dict) -> schemas.MeetingDetail:
         audio_recording_url=m.get("audio_recording_url"), video_recording_url=m.get("video_recording_url"),
         embeddings_status=m.get("embeddings_status", "not_started"),
         embedded_chunks=m.get("embedded_chunks", 0),
+        audio_transcript_language=m.get("audio_transcript_language"),
+        video_transcript_language=m.get("video_transcript_language"),
         error=m.get("error"), available_actions=actions,
         created_at=m.get("created_at"), updated_at=m.get("updated_at"), completed_at=m.get("completed_at"),
     )

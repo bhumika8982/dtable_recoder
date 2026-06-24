@@ -38,7 +38,7 @@ async def connect_to_mongo() -> None:
         # Atlas/SRV connections are TLS; pin the CA bundle explicitly.
         kwargs["tlsCAFile"] = certifi.where()
 
-    _mongo.client = AsyncIOMotorClient(settings.mongo_uri, **kwargs)
+    _mongo.client = AsyncIOMotorClient(settings.mongo_uri, tz_aware=True, **kwargs)
     _mongo.db = _mongo.client[settings.mongo_db_name]
 
     # Retry the initial connection a few times: free-tier Atlas clusters briefly

@@ -48,10 +48,12 @@ class TranscriptionService:
             from app.hf_compat import patch_hf_hub_download
             from app.speechbrain_compat import patch_speechbrain_k2
             from app.torch_compat import patch_torch_load
+            from app.whisperx_compat import patch_whisperx_ffmpeg
 
             patch_torch_load()  # WhisperX VAD checkpoint needs weights_only=False
             patch_hf_hub_download()  # use_auth_token -> token
             patch_speechbrain_k2()  # stub k2 before whisperx pulls in speechbrain
+            patch_whisperx_ffmpeg()  # use settings.ffmpeg_bin instead of bare "ffmpeg"
             import whisperx
 
             self._model = whisperx.load_model(
@@ -67,7 +69,16 @@ class TranscriptionService:
 
         model = self._load_model()
         audio = whisperx.load_audio(audio_path)
-        result = model.transcribe(audio, batch_size=settings.whisper_batch_size)
+        # Pass language=None so WhisperX auto-detects per file (prevents the
+        # model from locking onto its init language for multilingual meetings).
+        # task="transcribe" ensures speech is kept in the original language —
+        # never silently translated into English.
+        result = model.transcribe(
+            audio,
+            batch_size=settings.whisper_batch_size,
+            language=settings.whisper_language,  # None → auto-detect
+            task="transcribe",
+        )
 
         language = result.get("language", settings.whisper_language or "en")
 

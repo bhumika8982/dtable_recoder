@@ -6,12 +6,22 @@ Wires up CORS, MongoDB lifecycle, and all routers. Run with:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+
+# If FFMPEG_BIN points to a specific file (not just "ffmpeg"), prepend its
+# directory to PATH so whisperx.load_audio — which calls ffmpeg as a bare
+# command — can find the same binary that our audio_service uses.
+_ffmpeg_bin = settings.ffmpeg_bin
+if os.sep in _ffmpeg_bin or "/" in _ffmpeg_bin:
+    _ffmpeg_dir = os.path.dirname(os.path.abspath(_ffmpeg_bin))
+    if _ffmpeg_dir not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.logging_config import setup_logging
 from app.meeting_bot.poller import mb_poller

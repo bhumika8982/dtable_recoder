@@ -9,6 +9,7 @@ import AiTranscriptViewer from "./AiTranscriptViewer.jsx";
 import MomViewer from "./MomViewer.jsx";
 import RecordingPlayer from "./RecordingPlayer.jsx";
 import AskPanel from "./AskPanel.jsx";
+import VideoPage from "./VideoPage.jsx";
 
 const GENERATING = new Set(["generating", "uploading"]);
 
@@ -68,16 +69,18 @@ export default function ModuleView({ meeting, moduleKey, onUpdate }) {
     );
   }
 
+  // The combined video page and the ask panel manage their own card layout.
+  const noWrapCard = moduleKey === "ask" || moduleKey === "video";
+
   return (
     <div className="mb-module-page">
       <ModuleHeader
         meeting={meeting}
         title={mod.title}
-        status={status}
+        status={moduleKey === "video" ? undefined : status}
         onBack={() => navigate(`/meetings/${id}`)}
       />
-      {/* AskPanel renders its own card; everything else is wrapped here. */}
-      {moduleKey === "ask" ? (
+      {noWrapCard ? (
         renderBody({ moduleKey, meeting, data, status, busy, trigger, onUpdate })
       ) : (
         <section className="card">
@@ -127,7 +130,7 @@ function renderBody({ moduleKey, meeting, data, status, busy, trigger, onUpdate 
 
     case "audio-transcript":
       return status === "generated" ? (
-        <TranscriptWithLanguage meetingId={meeting.meeting_id} source="audio" initialChunks={data?.chunks} />
+        <TranscriptWithLanguage meetingId={meeting.meeting_id} source="audio" initialChunks={data?.chunks} detectedLanguage={meeting.audio_transcript_language} />
       ) : (
         <button disabled={!a.can_generate_audio_transcript || busy}
           onClick={() => trigger(meetingBotApi.transcribeAudio, "Audio transcript")}>
@@ -141,7 +144,7 @@ function renderBody({ moduleKey, meeting, data, status, busy, trigger, onUpdate 
       ) : (
         <>
           {meeting.audio_transcript_status !== "generated" && (
-            <p className="muted">Generate the audio transcript first.</p>
+            <p className="muted">Audio transcript will be generated automatically before AI proofreading starts.</p>
           )}
           <button disabled={!a.can_generate_ai_transcript || busy}
             onClick={() => trigger(meetingBotApi.generateAiTranscript, "AI transcript")}>
@@ -169,7 +172,12 @@ function renderBody({ moduleKey, meeting, data, status, busy, trigger, onUpdate 
 
     case "video-transcript":
       return status === "generated" ? (
-        <TranscriptViewer chunks={data?.chunks} />
+        <TranscriptWithLanguage
+          meetingId={meeting.meeting_id}
+          source="video"
+          initialChunks={data?.chunks}
+          detectedLanguage={meeting.video_transcript_language}
+        />
       ) : (
         <button disabled={!a.can_generate_video_transcript || busy}
           onClick={() => trigger(meetingBotApi.transcribeVideo, "Video transcript")}>
@@ -191,6 +199,9 @@ function renderBody({ moduleKey, meeting, data, status, busy, trigger, onUpdate 
           </button>
         </>
       );
+
+    case "video":
+      return <VideoPage meeting={meeting} onUpdate={onUpdate} />;
 
     case "ask":
       return <AskPanel meeting={meeting} onUpdate={onUpdate} />;
