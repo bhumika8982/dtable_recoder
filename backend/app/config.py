@@ -67,7 +67,13 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.0-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-    # ---- AssemblyAI (cloud transcription — replaces WhisperX when key is set) ----
+    # ---- Deepgram (primary cloud transcription — Nova-3, highest accuracy) ----
+    # Get free key at https://console.deepgram.com
+    deepgram_api_key: Optional[str] = None
+    # "hi" = Hindi/Hinglish, "en" = English, "multi" = auto multilingual (best for Hinglish)
+    deepgram_language: str = "hi"
+
+    # ---- AssemblyAI (fallback cloud transcription) ----
     assemblyai_api_key: Optional[str] = None
     # "hi" = Hindi/Hinglish (best for Indian meetings), "en" = English only, blank = auto-detect
     assemblyai_language: Optional[str] = None

@@ -33,6 +33,11 @@ async def transcribe_to_chunks(
     """
     from app.config import settings
 
+    # Priority: Deepgram → AssemblyAI → WhisperX (local)
+    if settings.deepgram_api_key:
+        return await _transcribe_deepgram(
+            audio_path, meeting_id, bot_id, source, num_speakers
+        )
     if settings.assemblyai_api_key:
         return await _transcribe_assemblyai(
             audio_path, meeting_id, bot_id, source, num_speakers
@@ -40,6 +45,35 @@ async def transcribe_to_chunks(
     return await _transcribe_whisperx(
         audio_path, meeting_id, bot_id, source, num_speakers, speaker_turns
     )
+
+
+# --------------------------------------------------------------------------- #
+# Deepgram path  (Nova-3, highest accuracy)
+# --------------------------------------------------------------------------- #
+async def _transcribe_deepgram(
+    audio_path: str,
+    meeting_id: str,
+    bot_id: Optional[str],
+    source: Source,
+    num_speakers: Optional[int],
+) -> tuple[list[dict[str, Any]], str, str]:
+    from app.config import settings
+    from app.services.deepgram_service import DeepgramService
+
+    logger.info("[%s] Using Deepgram Nova-3 transcription: %s", source.value, audio_path)
+    svc = DeepgramService(settings.deepgram_api_key, language=settings.deepgram_language)
+    result = await svc.transcribe(audio_path, num_speakers=num_speakers)
+
+    detected_language = result.get("language", "")
+    segments = result.get("segments", [])
+    confidence = result.get("confidence", 0)
+    logger.info(
+        "[%s] Deepgram done: %d segments  lang=%s  confidence=%.0f%%",
+        source.value, len(segments), detected_language, confidence * 100,
+    )
+
+    chunks = segments_to_chunks(segments, meeting_id, bot_id, source)
+    return chunks, result.get("full_text", ""), detected_language
 
 
 # --------------------------------------------------------------------------- #
