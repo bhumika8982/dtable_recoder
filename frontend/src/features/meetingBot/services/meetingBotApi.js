@@ -30,10 +30,13 @@ export const meetingBotApi = {
   getMom: (id, source) => request(`/meetings/${id}/mom/${source}`),
 
   transcribeAudio: (id) => request(`/meetings/${id}/audio/transcribe`, { method: "POST" }),
+  cancelAudioTranscript: (id) => request(`/meetings/${id}/audio/transcribe/cancel`, { method: "POST" }),
   generateAudioMom: (id) => request(`/meetings/${id}/audio/generate-mom`, { method: "POST" }),
   transcribeVideo: (id) => request(`/meetings/${id}/video/transcribe`, { method: "POST" }),
+  cancelVideoTranscript: (id) => request(`/meetings/${id}/video/transcribe/cancel`, { method: "POST" }),
   generateVideoMom: (id) => request(`/meetings/${id}/video/generate-mom`, { method: "POST" }),
   generateAiTranscript: (id) => request(`/meetings/${id}/ai-transcript/generate`, { method: "POST" }),
+  cancelAiTranscript: (id) => request(`/meetings/${id}/ai-transcript/cancel`, { method: "POST" }),
 
   generateEmbeddings: (id) => request(`/meetings/${id}/embeddings`, { method: "POST" }),
   ask: (id, question) =>

@@ -58,10 +58,26 @@ class Settings(BaseSettings):
     meeting_bot_webhook_base_url: Optional[str] = None
 
     # ---- Groq (free-tier, OpenAI-compatible) ----
-    # Get a free key at https://console.groq.com/keys (no credit card).
     groq_api_key: Optional[str] = None
     groq_model: str = "llama-3.3-70b-versatile"
     groq_base_url: str = "https://api.groq.com/openai/v1"
+
+    # ---- Gemini (Google, OpenAI-compatible endpoint) ----
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+    # ---- AssemblyAI (cloud transcription — replaces WhisperX when key is set) ----
+    assemblyai_api_key: Optional[str] = None
+    # "hi" = Hindi/Hinglish (best for Indian meetings), "en" = English only, blank = auto-detect
+    assemblyai_language: Optional[str] = None
+
+    @field_validator("assemblyai_language", mode="before")
+    @classmethod
+    def _blank_lang_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
     # ---- WhisperX ----
     whisper_model: str = "large-v2"

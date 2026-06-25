@@ -201,7 +201,13 @@ function LiveTab({ meeting, onUpdate }) {
             </div>
           )}
           {aiStatus === "generating" && (
-            <div className="mdp-loading-row"><Spin />AI is proofreading the transcript…</div>
+            <div className="mdp-loading-row">
+              <Spin />AI is proofreading the transcript…
+              <button className="mdp-btn-cancel" onClick={async () => {
+                try { await meetingBotApi.cancelAiTranscript(id); onUpdate?.(); }
+                catch (e) { alert(`Cancel failed: ${e.message}`); }
+              }}>✕ Stop</button>
+            </div>
           )}
           {aiStatus === "failed" && (
             <div className="mdp-gen-block">
@@ -458,8 +464,16 @@ function MediaTab({ type, meeting, onUpdate }) {
       {/* Transcript card */}
       <Panel icon="📄" title={`${label} Transcript`} badge={txStatus}>
         {txGenerating && (
-          <div className="mdp-loading-row"><Spin />
-            Transcribing — this may take a few minutes…
+          <div className="mdp-loading-row">
+            <Spin />Transcribing — this may take a few minutes…
+            <button className="mdp-btn-cancel" onClick={async () => {
+              try {
+                await (isVideo
+                  ? meetingBotApi.cancelVideoTranscript
+                  : meetingBotApi.cancelAudioTranscript)(id);
+                onUpdate?.();
+              } catch (e) { alert(`Cancel failed: ${e.message}`); }
+            }}>✕ Stop</button>
           </div>
         )}
         {txStatus === "failed" && (

@@ -28,6 +28,17 @@ class LLMService:
             # Injected client (tests / custom wiring) — honour it as-is.
             self._client = client
             self.model = settings.openai_model
+        elif settings.llm_provider.lower() == "gemini":
+            if not settings.gemini_api_key:
+                raise RuntimeError(
+                    "LLM_PROVIDER=gemini but GEMINI_API_KEY is not set in .env. "
+                    "Get a free key at https://aistudio.google.com/apikey"
+                )
+            self._client = AsyncOpenAI(
+                api_key=settings.gemini_api_key, base_url=settings.gemini_base_url
+            )
+            self.model = settings.gemini_model
+            logger.info("LLM provider: Gemini (model=%s).", self.model)
         elif settings.llm_provider.lower() == "groq":
             if not settings.groq_api_key:
                 raise RuntimeError(
@@ -40,6 +51,10 @@ class LLMService:
             self.model = settings.groq_model
             logger.info("LLM provider: Groq (model=%s).", self.model)
         else:
+            if not settings.openai_api_key:
+                raise RuntimeError(
+                    "LLM_PROVIDER=openai but OPENAI_API_KEY is not set in .env."
+                )
             self._client = AsyncOpenAI(api_key=settings.openai_api_key)
             self.model = settings.openai_model
             logger.info("LLM provider: OpenAI (model=%s).", self.model)

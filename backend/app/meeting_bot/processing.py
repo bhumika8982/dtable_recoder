@@ -165,6 +165,8 @@ async def run_media_transcription(meeting_id: str, source: Source, db) -> None:
     await repo.update_meeting(meeting_id, {status_field: TranscriptStatus.GENERATING.value})
     await broker.publish(meeting_id, "status", {status_field: TranscriptStatus.GENERATING.value})
 
+    from app.config import settings
+
     base = audio_service.work_dir(meeting_id)
     media_local = os.path.join(base, f"src.{ 'mp4' if source == Source.VIDEO else 'mp3'}")
     wav_local = os.path.join(base, f"{source.value}.wav")
@@ -172,24 +174,33 @@ async def run_media_transcription(meeting_id: str, source: Source, db) -> None:
         # 1. fetch media: prefer S3, fall back to a fresh Recall URL.
         await _fetch_media(repo, s3, recall, meeting, kind, media_local, cid)
 
-        # 2. ensure a transcription-ready WAV.
-        if source == Source.VIDEO:
+        # 2. AssemblyAI works best on the original MP3/MP4 (full quality).
+        #    Only convert to WAV when falling back to WhisperX (which requires it).
+        use_assemblyai = bool(settings.assemblyai_api_key)
+        if use_assemblyai:
+            # Pass the original file directly — no quality loss from WAV conversion.
+            audio_for_transcription = media_local
+            logger.info("[%s] AssemblyAI path: using original %s (no WAV conversion)", cid, kind)
+        elif source == Source.VIDEO:
             wav_local = await video_service.video_to_wav(media_local, meeting_id)
+            audio_for_transcription = wav_local
         else:
             wav_local = await audio_service.ensure_wav(media_local, wav_local)
+            audio_for_transcription = wav_local
 
         # 3. real speaker names (Recall timeline) if available, else pyannote.
         speaker_turns = None
-        try:
-            if meeting.get("bot_id"):
-                turns = await recall.get_speaker_timeline(meeting["bot_id"])
-                speaker_turns = turns or None
-        except Exception:
-            logger.warning("[%s] speaker timeline unavailable; using pyannote", cid)
+        if not use_assemblyai:  # AssemblyAI does its own diarization
+            try:
+                if meeting.get("bot_id"):
+                    turns = await recall.get_speaker_timeline(meeting["bot_id"])
+                    speaker_turns = turns or None
+            except Exception:
+                logger.warning("[%s] speaker timeline unavailable; using pyannote", cid)
 
         # 4. transcribe -> chunks.
         chunks, full_text, detected_lang = await transcribe_to_chunks(
-            wav_local, meeting_id, meeting.get("bot_id"), source,
+            audio_for_transcription, meeting_id, meeting.get("bot_id"), source,
             num_speakers=meeting.get("num_speakers"), speaker_turns=speaker_turns,
         )
         if detected_lang:
@@ -218,7 +229,11 @@ async def run_media_transcription(meeting_id: str, source: Source, db) -> None:
         })
         await broker.publish(meeting_id, "status", {status_field: TranscriptStatus.FAILED.value})
     finally:
-        _cleanup(media_local, wav_local)
+        # Always clean up the original media file.
+        # Only clean up WAV if it was actually created (not needed for AssemblyAI path).
+        _cleanup(media_local)
+        if wav_local and os.path.exists(wav_local):
+            _cleanup(wav_local)
 
 
 async def _fetch_media(repo, s3, recall, meeting, kind, dest, cid) -> None:

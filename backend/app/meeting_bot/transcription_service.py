@@ -1,9 +1,11 @@
 """High-accuracy transcription for the optional audio/video re-runs.
 
-Reuses the existing WhisperX transcription, pyannote diarization and the merge
-logic, then converts the result into source-tagged transcript *chunks* (one per
-utterance) ready to persist. Long media is handled naturally by WhisperX's own
-segmenting; chunk text is additionally available for embeddings.
+Uses AssemblyAI (cloud) when ASSEMBLYAI_API_KEY is set in .env — it handles
+English, Hindi, and Hinglish mixing automatically and returns speaker-labelled
+segments without needing WhisperX or pyannote locally.
+
+Falls back to the local WhisperX + pyannote pipeline when no AssemblyAI key
+is configured.
 """
 from __future__ import annotations
 
@@ -12,9 +14,6 @@ import uuid
 from typing import Any, Optional
 
 from app.meeting_bot.models import Source
-from app.services.diarization_service import get_diarization_service
-from app.services.merge_service import merge_transcript_with_speakers
-from app.services.transcription_service import get_transcription_service
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +28,68 @@ async def transcribe_to_chunks(
 ) -> tuple[list[dict[str, Any]], str, str]:
     """Transcribe ``audio_path`` and return ``(chunks, full_text, language)``.
 
-    ``speaker_turns`` lets the caller supply real names (e.g. Recall timeline);
-    otherwise pyannote diarization is used (best-effort, never fatal).
-    ``language`` is the ISO 639-1 code auto-detected by WhisperX (e.g. "hi",
-    "en") — empty string when detection was inconclusive.
+    Prefers AssemblyAI (cloud) when ASSEMBLYAI_API_KEY is set.
+    Falls back to local WhisperX + pyannote otherwise.
     """
-    logger.info("[%s] Transcription started: %s", source.value, audio_path)
+    from app.config import settings
+
+    if settings.assemblyai_api_key:
+        return await _transcribe_assemblyai(
+            audio_path, meeting_id, bot_id, source, num_speakers
+        )
+    return await _transcribe_whisperx(
+        audio_path, meeting_id, bot_id, source, num_speakers, speaker_turns
+    )
+
+
+# --------------------------------------------------------------------------- #
+# AssemblyAI path
+# --------------------------------------------------------------------------- #
+async def _transcribe_assemblyai(
+    audio_path: str,
+    meeting_id: str,
+    bot_id: Optional[str],
+    source: Source,
+    num_speakers: Optional[int],
+) -> tuple[list[dict[str, Any]], str, str]:
+    from app.config import settings
+    from app.services.assemblyai_service import AssemblyAIService
+
+    logger.info("[%s] Using AssemblyAI transcription: %s", source.value, audio_path)
+    svc = AssemblyAIService(settings.assemblyai_api_key, language=settings.assemblyai_language)
+    result = await svc.transcribe(audio_path, num_speakers=num_speakers)
+
+    detected_language = result.get("language", "")
+    segments = result.get("segments", [])
+    logger.info(
+        "[%s] AssemblyAI done: %d segments (lang=%s)",
+        source.value, len(segments), detected_language,
+    )
+
+    chunks = segments_to_chunks(segments, meeting_id, bot_id, source)
+    return chunks, result.get("full_text", ""), detected_language
+
+
+# --------------------------------------------------------------------------- #
+# WhisperX + pyannote fallback path
+# --------------------------------------------------------------------------- #
+async def _transcribe_whisperx(
+    audio_path: str,
+    meeting_id: str,
+    bot_id: Optional[str],
+    source: Source,
+    num_speakers: Optional[int],
+    speaker_turns: Optional[list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], str, str]:
+    from app.services.diarization_service import get_diarization_service
+    from app.services.merge_service import merge_transcript_with_speakers
+    from app.services.transcription_service import get_transcription_service
+
+    logger.info("[%s] Using WhisperX transcription: %s", source.value, audio_path)
     raw = await get_transcription_service().transcribe(audio_path)
     detected_language = raw.get("language") or ""
     logger.info(
-        "[%s] Transcription done: %d segments (lang=%s)",
+        "[%s] WhisperX done: %d segments (lang=%s)",
         source.value, len(raw.get("segments", [])), detected_language,
     )
 

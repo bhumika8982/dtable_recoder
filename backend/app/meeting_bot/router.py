@@ -238,6 +238,39 @@ async def video_transcribe(meeting_id: str, bg: BackgroundTasks, repo: MeetingBo
     return await _start_transcription(meeting_id, Source.VIDEO, bg, repo)
 
 
+@router.post("/meetings/{meeting_id}/audio/transcribe/cancel")
+async def cancel_audio_transcribe(meeting_id: str, repo: MeetingBotRepository = Depends(get_repo)):
+    """Cancel / reset a stuck audio transcription back to not_started."""
+    return await _cancel_transcription(meeting_id, Source.AUDIO, repo)
+
+
+@router.post("/meetings/{meeting_id}/video/transcribe/cancel")
+async def cancel_video_transcribe(meeting_id: str, repo: MeetingBotRepository = Depends(get_repo)):
+    """Cancel / reset a stuck video transcription back to not_started."""
+    return await _cancel_transcription(meeting_id, Source.VIDEO, repo)
+
+
+@router.post("/meetings/{meeting_id}/ai-transcript/cancel")
+async def cancel_ai_transcript(meeting_id: str, repo: MeetingBotRepository = Depends(get_repo)):
+    """Cancel / reset a stuck AI transcript generation back to not_started."""
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    await repo.update_meeting(meeting_id, {"ai_transcript_status": TranscriptStatus.NOT_STARTED.value})
+    await broker.publish(meeting_id, "status", {"ai_transcript_status": TranscriptStatus.NOT_STARTED.value})
+    return {"ok": True, "meeting_id": meeting_id, "cancelled": "ai_transcript"}
+
+
+async def _cancel_transcription(meeting_id: str, source: Source, repo: MeetingBotRepository):
+    meeting = await repo.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    field = f"{source.value}_transcript_status"
+    await repo.update_meeting(meeting_id, {field: TranscriptStatus.NOT_STARTED.value})
+    await broker.publish(meeting_id, "status", {field: TranscriptStatus.NOT_STARTED.value})
+    return {"ok": True, "meeting_id": meeting_id, "cancelled": f"{source.value}_transcript"}
+
+
 @router.post("/meetings/{meeting_id}/ai-transcript/generate", response_model=schemas.JobAccepted, status_code=202)
 async def ai_transcript(meeting_id: str, bg: BackgroundTasks, repo: MeetingBotRepository = Depends(get_repo)):
     meeting = await repo.get_meeting(meeting_id)
